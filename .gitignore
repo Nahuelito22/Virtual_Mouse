@@ -52,3 +52,17 @@ src/static/
 # Ignorar features_api
 # src/api/features_api.py
 node_modules
+
+# Ignorar carpetas de compilación
+build/
+dist/
+*.spec
+
+# Ignorar entorno virtual
+venv/
+.env
+
+# Ignorar archivos temporales de Python
+__pycache__/
+*.pyc
+Release/
