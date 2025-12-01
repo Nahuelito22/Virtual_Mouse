@@ -16,8 +16,11 @@ El resultado es un **Mouse Virtual** fluido, con estabilización de movimiento (
 
 ## 🎮 Demo y Funcionalidades
 Demo de la aplicación:
+
 ![Demo del Mouse Virtual](assets/demo_screenshot.png)
+
 Demo de la aplicación en ejecución:
+
 ![Demo del Mouse Virtual en ejecución](assets/demo_screenshot_2.png)
 
 
