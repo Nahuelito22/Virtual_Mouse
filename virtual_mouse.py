@@ -1,149 +1,159 @@
 import cv2
 import mediapipe as mp
 import pyautogui
+import math
 
-# --- CONFIGURACIÓN Y CONSTANTES ---
-pyautogui.FAILSAFE = False
+# --- CONFIGURACIÓN ---
+# Desactiva la seguridad de esquinas de PyAutoGUI para evitar cierres accidentales
+# (Úsalo con cuidado, ten siempre lista la tecla 'q' para salir)
+pyautogui.FAILSAFE = False 
+
+# Obtener tamaño de pantalla
 SCREEN_W, SCREEN_H = pyautogui.size()
 
-# ¡NUEVO! Sensibilidad del movimiento. Aumenta para que el cursor se mueva más rápido.
-# Un buen valor para empezar es entre 2 y 4.
-MOVEMENT_SENSITIVITY = 3.0
+# Sensibilidad: Aumenta para moverte más rápido con menos movimiento de mano
+MOVEMENT_SENSITIVITY = 4.0 
 
-# --- INICIALIZACIÓN DE LIBRERÍAS ---
+# --- INICIALIZACIÓN DE MEDIAPIPE ---
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7, min_tracking_confidence=0.7)
+hands = mp_hands.Hands(
+    max_num_hands=1, 
+    min_detection_confidence=0.7, 
+    min_tracking_confidence=0.7
+)
 mp_drawing = mp.solutions.drawing_utils
-cap = cv2.VideoCapture(0)
-if not cap.isOpened():
-    print("Error: No se puede abrir la cámara.")
-    exit()
 
 # --- VARIABLES DE ESTADO ---
-# ¡NUEVO! Almacenan la última posición de la mano para el movimiento relativo.
 last_hand_x, last_hand_y = None, None
 click_gesture_active = False
 
-# --- FUNCIONES AUXILIARES DE DETECCIÓN DE GESTOS ---
-
 def get_finger_status(landmarks):
-    """Devuelve una lista de booleanos indicando si cada dedo está levantado."""
+    """
+    Devuelve una lista [Pulgar, Índice, Medio, Anular, Meñique] 
+    con True si el dedo está levantado y False si está bajado.
+    """
     status = []
-    finger_tip_ids = [
-        mp_hands.HandLandmark.THUMB_TIP, mp_hands.HandLandmark.INDEX_FINGER_TIP,
-        mp_hands.HandLandmark.MIDDLE_FINGER_TIP, mp_hands.HandLandmark.RING_FINGER_TIP,
-        mp_hands.HandLandmark.PINKY_TIP
-    ]
-    finger_pip_ids = [
-        mp_hands.HandLandmark.THUMB_IP, mp_hands.HandLandmark.INDEX_FINGER_PIP,
-        mp_hands.HandLandmark.MIDDLE_FINGER_PIP, mp_hands.HandLandmark.RING_FINGER_PIP,
-        mp_hands.HandLandmark.PINKY_PIP
-    ]
     
-    # Pulgar (eje X)
-    status.append(landmarks[finger_tip_ids[0]].x < landmarks[finger_pip_ids[0]].x)
-    # Otros 4 dedos (eje Y)
+    # IDs de las puntas de los dedos
+    tips = [4, 8, 12, 16, 20]
+    # IDs de las articulaciones medias (PIPs) para comparar
+    pips = [3, 6, 10, 14, 18] # El 3 es la IP del pulgar
+    
+    # Lógica para el Pulgar (es diferente porque se mueve lateralmente)
+    # Asumimos mano derecha, si x de la punta < x de la IP, está "abierto" (hacia la izquierda)
+    # Nota: Esto puede variar si la mano está invertida, pero funciona para gestos básicos.
+    status.append(landmarks[tips[0]].x < landmarks[pips[0]].x)
+    
+    # Lógica para los otros 4 dedos (se mueven verticalmente)
     for i in range(1, 5):
-        status.append(landmarks[finger_tip_ids[i]].y < landmarks[finger_pip_ids[i]].y)
+        status.append(landmarks[tips[i]].y < landmarks[pips[i]].y)
         
     return status
 
-# --- BUCLE PRINCIPAL ---
-print("Iniciando control por gestos v2.0.")
-print("- Dedo índice levantado: Mover cursor (modo relativo)")
-print("- Puño cerrado: Clic izquierdo")
-print("- Gesto de victoria: Clic derecho")
-print("- Índice, corazón y anular levantados: Doble clic")
-print("Presiona 'q' para salir.")
+def main():
+    global last_hand_x, last_hand_y, click_gesture_active
+    
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("¡Error Crítico!: No se pudo acceder a la cámara.")
+        return
 
-while cap.isOpened():
-    success, frame = cap.read()
-    if not success: continue
+    print("--- MOUSE VIRTUAL POR GESTOS ---")
+    print("1. Índice levantado: Mover cursor")
+    print("2. Puño cerrado: Clic Izquierdo")
+    print("3. V (Índice + Medio): Clic Derecho")
+    print("4. Tres dedos (Índice+Medio+Anular): Doble Clic")
+    print("PRESIONA 'q' PARA SALIR")
 
-    frame = cv2.flip(frame, 1)
-    frame_h, frame_w, _ = frame.shape
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    results = hands.process(rgb_frame)
+    while True:
+        success, frame = cap.read()
+        if not success:
+            continue
 
-    current_action = "Mano no detectada"
-
-    if results.multi_hand_landmarks:
-        hand_landmarks = results.multi_hand_landmarks[0]
-        landmarks = hand_landmarks.landmark
-        mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-
-        # Obtener el estado de los dedos (levantados o no)
-        # [pulgar, indice, corazon, anular, meñique]
-        fingers_up = get_finger_status(landmarks)
-
-        # --- DETECCIÓN DE GESTOS Y ACCIONES ---
+        # Espejar la cámara para que sea intuitivo (como un espejo)
+        frame = cv2.flip(frame, 1)
+        frame_h, frame_w, _ = frame.shape
         
-        # Gesto de Mover (solo índice levantado)
-        if fingers_up == [False, True, False, False, False]:
-            current_action = "Moviendo cursor..."
-            click_gesture_active = False # Permitir futuros clics
+        # Convertir a RGB para MediaPipe
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = hands.process(rgb_frame)
+
+        current_action = "Esperando mano..."
+
+        if results.multi_hand_landmarks:
+            hand_landmarks = results.multi_hand_landmarks[0]
+            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+
+            landmarks = hand_landmarks.landmark
+            fingers_up = get_finger_status(landmarks)
+
+            # --- LÓGICA DE GESTOS ---
+
+            # 1. GESTO DE MOVER (Solo Índice levantado)
+            # A veces el pulgar puede interferir, así que somos flexibles con el pulgar.
+            if fingers_up[1] and not fingers_up[2] and not fingers_up[3] and not fingers_up[4]:
+                current_action = "Moviendo..."
+                click_gesture_active = False 
+                
+                index_x = landmarks[8].x
+                index_y = landmarks[8].y
+                
+                if last_hand_x is None:
+                    last_hand_x, last_hand_y = index_x, index_y
+                else:
+                    delta_x = index_x - last_hand_x
+                    delta_y = index_y - last_hand_y
+                    
+                    # Mover mouse
+                    pyautogui.move(delta_x * frame_w * MOVEMENT_SENSITIVITY, 
+                                   delta_y * frame_h * MOVEMENT_SENSITIVITY)
+                    
+                    last_hand_x, last_hand_y = index_x, index_y
             
-            # --- LÓGICA DE MOVIMIENTO RELATIVO ---
-            index_tip = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP]
-            
-            if last_hand_x is None: # Si es la primera vez que detectamos el gesto
-                last_hand_x, last_hand_y = index_tip.x, index_tip.y
             else:
-                # Calcular el cambio (delta) desde la última posición
-                delta_x = index_tip.x - last_hand_x
-                delta_y = index_tip.y - last_hand_y
+                # Si no movemos, reseteamos la posición de referencia para evitar saltos
+                last_hand_x, last_hand_y = None, None
+
+                # 2. CLIC IZQUIERDO (Puño cerrado o solo pulgar)
+                if not any(fingers_up[1:]): # Si índice, medio, anular y meñique están bajados
+                    current_action = "CLIC IZQUIERDO"
+                    if not click_gesture_active:
+                        pyautogui.click()
+                        click_gesture_active = True
                 
-                # Mover el ratón proporcionalmente al cambio y la sensibilidad
-                pyautogui.move(delta_x * frame_w * MOVEMENT_SENSITIVITY, 
-                               delta_y * frame_h * MOVEMENT_SENSITIVITY)
+                # 3. CLIC DERECHO (Gesto de Paz / Victoria)
+                elif fingers_up[1] and fingers_up[2] and not fingers_up[3]:
+                    current_action = "CLIC DERECHO"
+                    if not click_gesture_active:
+                        pyautogui.rightClick()
+                        click_gesture_active = True
                 
-                # Actualizar la última posición
-                last_hand_x, last_hand_y = index_tip.x, index_tip.y
-        
+                # 4. DOBLE CLIC (Tres dedos)
+                elif fingers_up[1] and fingers_up[2] and fingers_up[3] and not fingers_up[4]:
+                    current_action = "DOBLE CLIC"
+                    if not click_gesture_active:
+                        pyautogui.doubleClick()
+                        click_gesture_active = True
+                
+                else:
+                    current_action = "Gesto no detectado"
+                    click_gesture_active = False
+
         else:
-            # Si no estamos en modo "mover", reiniciamos la última posición.
-            # Esto es clave: permite "levantar" el ratón y reposicionar la mano.
             last_hand_x, last_hand_y = None, None
 
-            # Gesto de Clic Izquierdo (Puño cerrado)
-            if fingers_up == [False, False, False, False, False] or fingers_up == [True, False, False, False, False]:
-                current_action = "CLIC IZQUIERDO"
-                if not click_gesture_active:
-                    pyautogui.click(button='left')
-                    print("Clic Izquierdo")
-                    click_gesture_active = True
-            
-            # Gesto de Clic Derecho (Victoria)
-            elif fingers_up == [False, True, True, False, False]:
-                current_action = "CLIC DERECHO"
-                if not click_gesture_active:
-                    pyautogui.click(button='right')
-                    print("Clic Derecho")
-                    click_gesture_active = True
-            
-            # ¡NUEVO! Gesto de Doble Clic (Índice, Corazón, Anular)
-            elif fingers_up == [False, True, True, True, False]:
-                current_action = "DOBLE CLIC"
-                if not click_gesture_active:
-                    pyautogui.doubleClick()
-                    print("Doble Clic")
-                    click_gesture_active = True
-            else:
-                # Cualquier otro gesto resetea la bandera de clic
-                current_action = "Gesto no reconocido"
-                click_gesture_active = False
-
-    else:
-        # Si no se detecta ninguna mano, reiniciar el estado del movimiento
-        last_hand_x, last_hand_y = None, None
+        # Interfaz visual
+        cv2.putText(frame, current_action, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 
+                    1, (0, 255, 0), 2, cv2.LINE_AA)
         
-    cv2.putText(frame, current_action, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
-    cv2.imshow('Control por Gestos v2.0', frame)
+        cv2.imshow('Virtual Mouse AI', frame)
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
-cap.release()
-cv2.destroyAllWindows()
-hands.close()
-print("Programa finalizado.")
+    cap.release()
+    cv2.destroyAllWindows()
+    hands.close()
+
+if __name__ == "__main__":
+    main()
