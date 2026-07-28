@@ -1,68 +1,45 @@
-# Ignorar entorno virtual
+# Entornos virtuales
 venv/
 .venv/
 venvNimbus/
 .venvNimbus/
-# Archivos de compilación de Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
 
-# Archivos de configuración de IDEs (VS Code, PyCharm, etc.)
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# PyInstaller
+*.manifest
+
+# IDE / OS
 .vscode/
 .idea/
-
-# Archivos de entorno (variables de configuración sensibles)
-.env
-
-# Archivos de bases de datos locales (si estás usando SQLite o similares)
-*.db
-*.sqlite3
-
-# Archivos generados por el sistema operativo
-.DS_Store   # macOS
-Thumbs.db   # Windows
-
-# Archivos de logs
-*.log
-
-# Otros archivos generados por el sistema
-*.bak
+.DS_Store
+Thumbs.db
 *.swp
+*.bak
 
-# Archivos de documentacion generados
+# Entorno y logs
+.env
+*.log
+.cache.sqlite
+.ipynb_checkpoints/
+
+# Recursos locales / docs internas
+ayudas_y_recursos/
 estructura_directorio.txt
 Plan de Despliegue.txt
-
-# Plantilla commit
 plantilla_commit.txt
 
-# Carpeta de ayudas y recursos
-ayudas_y_recursos/
+# graphify
+graphify-out/
 
-# Ignorar checkpoints de Jupyter
-.ipynb_checkpoints/
-.cache.sqlite
-
-# Ignorar imagenes satelitales
-data/raw/imagenes_satelitales/
-src/static/
-
-# Ignorar features_api
-# src/api/features_api.py
-node_modules
-
-# Ignorar carpetas de compilación
-build/
-dist/
-*.spec
-
-# Ignorar entorno virtual
-venv/
-.env
-
-# Ignorar archivos temporales de Python
-__pycache__/
-*.pyc
+# No versionar el .exe grande (se genera con build.ps1)
 Release/
+*.exe

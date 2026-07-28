@@ -1,81 +1,136 @@
-# 🖱️ AI Virtual Mouse | Computer Vision Control
+# AI Virtual Mouse
 
-> **Control total de tu PC sin tocar el mouse, utilizando el poder de la Visión Artificial.**
+Controla el cursor de Windows con gestos de la mano, usando la webcam y visión artificial (MediaPipe + OpenCV).
 
-![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![OpenCV](https://img.shields.io/badge/OpenCV-Computer_Vision-green?logo=opencv&logoColor=white)
 ![MediaPipe](https://img.shields.io/badge/MediaPipe-Hand_Tracking-orange?logo=google&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
-## 📖 Sobre el Proyecto
-
-Este proyecto nació de la necesidad de controlar interfaces multimedia a distancia. Utilizando una cámara web estándar y algoritmos de **Deep Learning** (MediaPipe), el sistema detecta los "landmarks" de la mano en tiempo real y mapea gestos naturales a funciones del sistema operativo.
-
-El resultado es un **Mouse Virtual** fluido, con estabilización de movimiento (algoritmos de suavizado) y un sistema de gestos ergonómicos para clics y control de estado.
-
----
-
-## 🎮 Demo y Funcionalidades
-Demo de la aplicación:
+## Demo
 
 ![Demo del Mouse Virtual](assets/demo_screenshot.png)
 
-Demo de la aplicación en ejecución:
+![Demo en ejecución](assets/demo_screenshot_2.png)
 
-![Demo del Mouse Virtual en ejecución](assets/demo_screenshot_2.png)
+## Gestos
 
-
-### 🤖 Guía de Gestos (Ergonomía de Mano Completa)
-
-El sistema utiliza una lógica de "pellizcos" (pinch) para simular los clics, asignando cada acción a un dedo para maximizar la naturalidad:
-
-| Gesto | Acción | Feedback Visual |
+| Gesto | Acción | Feedback |
 | :--- | :--- | :--- |
-| **👆 Índice Arriba** | **Mover Cursor** | Recuadro Violeta (ROI) |
-| **🤏 Índice + Pulgar** | **Clic Izquierdo** | 🟢 Círculo Verde |
-| **🤏 Medio + Pulgar** | **Doble Clic** | 🟠 Círculo Naranja |
-| **🤏 Anular + Pulgar** | **Clic Derecho** | 🔴 Círculo Rojo |
-| **🤙 Meñique + Pulgar**| **Cerrar Aplicación** | 🟡 Línea Amarilla |
-| **✊ Puño Cerrado** | **Pausar Tracking** | Texto de Estado |
+| **Índice arriba** | Mover cursor | ROI violeta |
+| **Pulgar + índice** (toque corto) | Clic izquierdo | Círculo verde |
+| **Pulgar + índice** (mantener) | Arrastrar (drag) | Modo DRAG |
+| **Pulgar + medio** | Doble clic | Círculo naranja |
+| **Pulgar + anular** | Clic derecho | Círculo rojo |
+| **Índice + medio** arriba | Scroll vertical | Línea scroll |
+| **Pulgar + meñique** (mantener) | Cerrar app | Barra de progreso |
+| **Puño cerrado** | Pausar | Estado PAUSADO |
+| **Mano abierta** | Reanudar | Estado ACTIVO |
+
+### Teclas
+
+| Tecla | Acción |
+| :--- | :--- |
+| `Q` / `Esc` | Salir |
+| `H` | Mostrar / ocultar ayuda |
+| `L` | Mostrar / ocultar landmarks |
+| `+` / `-` | Ajustar suavizado del cursor |
+
+## Inicio rápido
+
+### Opción A — Ejecutable (Windows)
+
+1. Compila localmente (recomendado):
+
+```powershell
+.\build.ps1
+```
+
+El `.exe` queda en `Release\AI_Virtual_Mouse.exe`.
+
+2. O usa el launcher:
+
+```bat
+run.bat
+```
+
+(`run.bat` prioriza el `.exe` si existe; si no, corre con Python.)
+
+### Opción B — Desde código
+
+```bash
+git clone https://github.com/Nahuelito22/Virtual_Mouse.git
+cd Virtual_Mouse
+
+python -m venv venv
+# Windows:
+venv\Scripts\activate
+# Linux/macOS:
+# source venv/bin/activate
+
+pip install -r requirements.txt
+python virtual_mouse.py
+```
+
+### Argumentos opcionales
+
+```bash
+python virtual_mouse.py --camera 0 --smooth 6 --pinch 35
+python virtual_mouse.py --no-help
+```
+
+| Flag | Descripción | Default |
+| :--- | :--- | :--- |
+| `-c` / `--camera` | Índice de webcam | `0` |
+| `--width` / `--height` | Resolución de captura | `640` / `480` |
+| `--smooth` | Suavizado del cursor (1–20) | `5` |
+| `--pinch` | Umbral de pellizco (px) | `35` |
+| `--no-help` | Oculta el panel de ayuda al inicio | off |
+
+## Requisitos
+
+- Windows 10/11 (el control del mouse está pensado para escritorio Windows)
+- Webcam
+- Python 3.10–3.12 recomendado
+- Buena iluminación de la mano
+
+## Mejoras técnicas
+
+- **Debounce / cooldowns** en clics para evitar spam de eventos
+- **Drag & drop** manteniendo el pellizco izquierdo
+- **Scroll** con índice + medio
+- **Salida segura** con hold + progreso (evita cierres accidentales)
+- **Detección de mano** (izquierda/derecha) para el pulgar
+- **UI** con FPS, modo actual y panel de ayuda
+- **Suavizado** configurable en caliente (`+` / `-`)
+- **Manejo de errores** de cámara y limpieza de recursos
+- **Empaquetado** a `.exe` con `build.ps1` (PyInstaller)
+
+## Estructura
+
+```
+Virtual_Mouse/
+├── virtual_mouse.py      # App principal
+├── requirements.txt
+├── build.ps1             # Genera Release/AI_Virtual_Mouse.exe
+├── run.bat               # Launcher rápido
+├── AI_Virtual_Mouse.spec # Spec PyInstaller (regenerable)
+├── assets/               # Capturas para el README
+└── README.md
+```
+
+## Notas de uso
+
+1. Arranca en **PAUSADO**: abre la mano completa para activar.
+2. Mantén la mano dentro del recuadro ROI para alcanzar bien las esquinas.
+3. Si el cursor tiembla, sube el suavizado con `+`.
+4. Si los clics no registran, acerca un poco más el pellizco o baja `--pinch`.
+5. Cierra con `Q`, o manteniendo pulgar + meñique.
+
+## Licencia
+
+MIT — ver [LICENSE](LICENSE).
 
 ---
 
-## 🛠️ Tecnologías Implementadas
-
-* **OpenCV:** Procesamiento de imagen y renderizado de la interfaz (UI) tipo "Heads-Up Display".
-* **MediaPipe Hands:** Detección de 21 puntos clave de la mano con inferencia en tiempo real.
-* **PyAutoGUI:** Interfaz de automatización para el control del hardware (mouse/teclado).
-* **Numpy:** Cálculos matemáticos para la interpolación de coordenadas y suavizado de movimiento.
-
-## 🚀 Instalación y Uso
-
-### Opción 1: Ejecutable (Windows)
-Descarga el archivo `.exe` desde la sección de [Releases](link-a-tus-releases) y ejecútalo. No requiere instalación.
-
-### Opción 2: Correr desde el código
-
-1. Clonar el repositorio:
-
-    ```bash
-    git clone https://github.com/Nahuelito22/Virtual_Mouse
-    ```
-
-2. Instalar dependencias:
-
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-3. Ejecutar:
-    ```bash
-    python virtual_mouse.py
-    ```
-
-### 🧠 Desafíos Técnicos Superados
-1. Jitter (Temblor): Se implementó un algoritmo de suavizado para evitar que el cursor tiemble debido a la micro-fluctuación de la detección de la cámara.
-
-2. Mapeo de Coordenadas: Se creó una "Zona de Interés" (ROI) reducida para permitir alcanzar las esquinas de la pantalla sin necesidad de estirar el brazo fuera del campo de visión.
-
-3. Gestión de Estados: Implementación de modos "Activo" y "Pausa" para evitar interacciones accidentales.
-
---- 
-Hecho con 🐍 y mucha curiosidad por [Nahuel Ghilardi](https://nahuel-portfolio.vercel.app/#).
+Hecho con Python y curiosidad por [Nahuel Ghilardi](https://nahuel-portfolio.vercel.app/#).
