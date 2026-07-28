@@ -5,17 +5,22 @@ AI Virtual Mouse — control del cursor con gestos de la mano (MediaPipe + OpenC
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import sys
 import time
 from dataclasses import dataclass
 from enum import Enum, auto
+from pathlib import Path
 from typing import Optional
 
 import cv2
 import mediapipe as mp
 import numpy as np
 import pyautogui
+
+CONFIG_PATH = Path.home() / ".virtual_mouse" / "config.json"
+PICKER_WINDOW = "Elegir camara - AI Virtual Mouse"
 
 
 class Mode(Enum):
@@ -43,6 +48,229 @@ class Config:
     min_tracking_confidence: float = 0.6
     max_num_hands: int = 1
     window_name: str = "AI Virtual Mouse"
+
+
+@dataclass
+class CameraInfo:
+    index: int
+    width: int
+    height: int
+    name: str = ""
+
+    @property
+    def label(self) -> str:
+        base = self.name or f"Camara {self.index}"
+        return f"[{self.index}] {base} ({self.width}x{self.height})"
+
+
+def load_saved_camera() -> Optional[int]:
+    try:
+        if CONFIG_PATH.exists():
+            data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            idx = data.get("camera_index")
+            if isinstance(idx, int) and idx >= 0:
+                return idx
+    except Exception:
+        pass
+    return None
+
+
+def save_camera_index(index: int) -> None:
+    try:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        data: dict = {}
+        if CONFIG_PATH.exists():
+            try:
+                data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+        data["camera_index"] = index
+        CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def windows_camera_names() -> list[str]:
+    """Nombres amigables de dispositivos de imagen (orden aprox. DirectShow)."""
+    if sys.platform != "win32":
+        return []
+    try:
+        import subprocess
+
+        ps = (
+            "Get-CimInstance Win32_PnPEntity | "
+            "Where-Object { $_.PNPClass -eq 'Camera' -or $_.PNPClass -eq 'Image' } | "
+            "Select-Object -ExpandProperty Name"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if result.returncode != 0:
+            return []
+        names: list[str] = []
+        seen: set[str] = set()
+        for line in result.stdout.splitlines():
+            name = line.strip()
+            if not name or name in seen:
+                continue
+            # Filtrar micrófonos que a veces aparecen con nombre similar
+            if name.lower().startswith("microphone"):
+                continue
+            seen.add(name)
+            names.append(name)
+        return names
+    except Exception:
+        return []
+
+
+def open_capture(index: int, width: int = 640, height: int = 480) -> Optional[cv2.VideoCapture]:
+    backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY] if sys.platform == "win32" else [cv2.CAP_ANY]
+    for backend in backends:
+        cap = cv2.VideoCapture(index, backend)
+        if not cap.isOpened():
+            cap.release()
+            continue
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        ok, frame = cap.read()
+        if ok and frame is not None:
+            return cap
+        cap.release()
+    return None
+
+
+def discover_cameras(max_index: int = 8, width: int = 640, height: int = 480) -> list[CameraInfo]:
+    names = windows_camera_names()
+    found: list[CameraInfo] = []
+    for i in range(max_index):
+        cap = open_capture(i, width, height)
+        if cap is None:
+            continue
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or width
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or height
+        name = names[i] if i < len(names) else ""
+        # Heurística: virtual / teléfono suele verse en nombres
+        if not name:
+            name = f"Dispositivo {i}"
+        found.append(CameraInfo(index=i, width=w, height=h, name=name))
+        cap.release()
+    return found
+
+
+def print_cameras(cameras: list[CameraInfo]) -> None:
+    if not cameras:
+        print("No se detecto ninguna camara.")
+        return
+    print("Camaras disponibles:")
+    for cam in cameras:
+        tag = ""
+        low = cam.name.lower()
+        if any(k in low for k in ("phone", "iphone", "droidcam", "iriun", "epoccam", "virtual", "continuity")):
+            tag = "  <-- posible camara de celular/virtual"
+        elif any(k in low for k in ("logi", "webcam", "hd camera", "integrated", "usb camera")):
+            tag = "  <-- webcam"
+        print(f"  {cam.label}{tag}")
+    print("\nUso: python virtual_mouse.py -c <indice>")
+    print("     python virtual_mouse.py --pick-camera")
+
+
+def pick_camera_interactive(
+    cameras: list[CameraInfo],
+    start_index: Optional[int] = None,
+    width: int = 640,
+    height: int = 480,
+) -> Optional[int]:
+    """Selector visual: flechas o N/P cambian camara, Enter confirma, Esc cancela."""
+    if not cameras:
+        print("No hay camaras para elegir.", file=sys.stderr)
+        return None
+
+    indices = [c.index for c in cameras]
+    pos = 0
+    if start_index in indices:
+        pos = indices.index(start_index)
+
+    cap: Optional[cv2.VideoCapture] = None
+
+    def open_at(p: int) -> Optional[cv2.VideoCapture]:
+        return open_capture(cameras[p].index, width, height)
+
+    cap = open_at(pos)
+    if cap is None:
+        print("No se pudo abrir la camara inicial del selector.", file=sys.stderr)
+        return None
+
+    print("Selector de camara: <-/-> o N/P cambiar | Enter confirmar | Esc cancelar | 0-9 indice")
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                frame = np.zeros((height, width, 3), dtype=np.uint8)
+                cv2.putText(frame, "Sin senal", (40, height // 2),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            else:
+                if frame.shape[1] != width or frame.shape[0] != height:
+                    frame = cv2.resize(frame, (width, height))
+                frame = cv2.flip(frame, 1)
+
+            cam = cameras[pos]
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (0, 0), (width, 90), (20, 20, 20), cv2.FILLED)
+            cv2.rectangle(overlay, (0, height - 40), (width, height), (20, 20, 20), cv2.FILLED)
+            cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+
+            cv2.putText(frame, "ELEGIR CAMARA", (12, 32),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, COLOR_UI, 2)
+            cv2.putText(frame, cam.label[:50], (12, 68),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, COLOR_LEFT, 2)
+            cv2.putText(
+                frame,
+                f"{pos + 1}/{len(cameras)}  |  Enter=usar  Esc=cancelar  <-/-> cambiar",
+                (12, height - 14),
+                cv2.FONT_HERSHEY_PLAIN,
+                1.1,
+                COLOR_DIM,
+                1,
+            )
+
+            low = cam.name.lower()
+            if any(k in low for k in ("phone", "virtual", "droidcam", "iriun", "continuity")):
+                cv2.putText(frame, "Parece camara virtual/celular", (width - 320, 32),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_RIGHT, 1)
+
+            cv2.imshow(PICKER_WINDOW, frame)
+            key = cv2.waitKey(20) & 0xFF
+
+            if key in (13, 10):  # Enter
+                chosen = cam.index
+                save_camera_index(chosen)
+                print(f"Camara seleccionada: {cam.label}")
+                return chosen
+            if key in (27, ord("q"), ord("Q")):
+                return None
+            if key in (81, 2, ord("a"), ord("A"), ord("p"), ord("P")):  # left
+                pos = (pos - 1) % len(cameras)
+                cap.release()
+                cap = open_at(pos) or cap
+            elif key in (83, 3, ord("d"), ord("D"), ord("n"), ord("N")):  # right
+                pos = (pos + 1) % len(cameras)
+                cap.release()
+                cap = open_at(pos) or cap
+            elif ord("0") <= key <= ord("9"):
+                want = key - ord("0")
+                if want in indices:
+                    pos = indices.index(want)
+                    cap.release()
+                    cap = open_at(pos) or cap
+    finally:
+        if cap is not None:
+            cap.release()
+        cv2.destroyWindow(PICKER_WINDOW)
 
 
 # Colores BGR
@@ -104,18 +332,57 @@ class VirtualMouse:
         self._status_msg = ""
         self._status_until = 0.0
 
-    def open_camera(self) -> None:
-        self.cap = cv2.VideoCapture(self.cfg.cam_index, cv2.CAP_DSHOW)
-        if not self.cap.isOpened():
-            self.cap = cv2.VideoCapture(self.cfg.cam_index)
-        if not self.cap.isOpened():
+    def open_camera(self, index: Optional[int] = None) -> None:
+        if index is not None:
+            self.cfg.cam_index = index
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
+
+        self.cap = open_capture(self.cfg.cam_index, self.cfg.cam_width, self.cfg.cam_height)
+        if self.cap is None:
+            cams = discover_cameras(width=self.cfg.cam_width, height=self.cfg.cam_height)
+            hint = ""
+            if cams:
+                hint = " Camaras detectadas: " + ", ".join(str(c.index) for c in cams)
+                hint += ". Prueba: python virtual_mouse.py --pick-camera"
             raise RuntimeError(
-                f"No se pudo abrir la cámara (índice {self.cfg.cam_index}). "
-                "Comprueba que esté conectada y no la use otra app."
+                f"No se pudo abrir la camara (indice {self.cfg.cam_index})."
+                " Comprueba que este conectada y no la use otra app."
+                + hint
             )
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cfg.cam_width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cfg.cam_height)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        save_camera_index(self.cfg.cam_index)
+
+    def switch_camera(self) -> None:
+        """Abre el selector visual y cambia de camara en caliente."""
+        self.end_drag()
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
+
+        cameras = discover_cameras(width=self.cfg.cam_width, height=self.cfg.cam_height)
+        if not cameras:
+            self.set_status("Sin camaras")
+            try:
+                self.open_camera(self.cfg.cam_index)
+            except RuntimeError:
+                pass
+            return
+
+        chosen = pick_camera_interactive(
+            cameras,
+            start_index=self.cfg.cam_index,
+            width=self.cfg.cam_width,
+            height=self.cfg.cam_height,
+        )
+        target = chosen if chosen is not None else self.cfg.cam_index
+        try:
+            self.open_camera(target)
+            self.set_status(f"Cam {self.cfg.cam_index}")
+            print(f"Usando camara indice {self.cfg.cam_index}")
+        except RuntimeError as exc:
+            print(f"[ERROR] {exc}", file=sys.stderr)
+            self.set_status("Error camara")
 
     def close(self) -> None:
         if self._is_dragging:
@@ -405,9 +672,9 @@ class VirtualMouse:
             )
 
         if self.mode == Mode.PAUSED:
-            hint = "Abre la mano para activar  |  Q salir  |  H ayuda"
+            hint = f"Cam {self.cfg.cam_index} | Abre la mano  |  Q salir  |  C camara  |  H ayuda"
         else:
-            hint = "Puno=pausa | Indice=mover | Pinch=clic | Ind+Med=scroll | Q=salir"
+            hint = f"Cam {self.cfg.cam_index} | Puno=pausa | Pinch=clic | C=camara | Q=salir"
         cv2.putText(frame, hint, (12, h - 18), cv2.FONT_HERSHEY_PLAIN, 1.05, COLOR_DIM, 1)
 
         if self.show_help:
@@ -423,7 +690,7 @@ class VirtualMouse:
                 "",
                 "TECLAS",
                 "Q  salir   H  ayuda   L  landmarks",
-                "+/- suavizado",
+                "C  cambiar camara   +/- suavizado",
             ]
             box_h = 22 * len(lines) + 20
             box_w = 320
@@ -452,6 +719,8 @@ class VirtualMouse:
             self.show_help = not self.show_help
         elif key in (ord("l"), ord("L")):
             self.show_landmarks = not self.show_landmarks
+        elif key in (ord("c"), ord("C")):
+            self.switch_camera()
         elif key in (ord("+"), ord("=")):
             self.cfg.smoothening = min(20.0, self.cfg.smoothening + 1)
             self.set_status(f"Suave {self.cfg.smoothening:.0f}")
@@ -538,7 +807,14 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="AI Virtual Mouse — controla el cursor con gestos de la mano.",
     )
-    parser.add_argument("--camera", "-c", type=int, default=0, help="Índice de la cámara (default: 0)")
+    parser.add_argument(
+        "--camera", "-c",
+        type=int,
+        default=None,
+        help="Indice de la camara (si omites, usa la guardada o el selector)",
+    )
+    parser.add_argument("--list-cameras", action="store_true", help="Listar camaras y salir")
+    parser.add_argument("--pick-camera", action="store_true", help="Abrir selector visual de camara")
     parser.add_argument("--width", type=int, default=640, help="Ancho de captura")
     parser.add_argument("--height", type=int, default=480, help="Alto de captura")
     parser.add_argument("--smooth", type=float, default=5.0, help="Factor de suavizado (1-20)")
@@ -547,10 +823,64 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def resolve_camera_index(args: argparse.Namespace) -> Optional[int]:
+    """Resuelve que camara usar. None = cancelado por el usuario."""
+    cameras = discover_cameras(width=args.width, height=args.height)
+
+    if args.list_cameras:
+        print_cameras(cameras)
+        return None
+
+    if not cameras:
+        print(
+            "[ERROR] No se detecto ninguna camara. "
+            "Conecta una webcam o cierra apps que la esten usando.",
+            file=sys.stderr,
+        )
+        return None
+
+    if args.camera is not None:
+        if args.camera not in [c.index for c in cameras]:
+            print(f"[AVISO] Indice {args.camera} no responde. Camaras:", file=sys.stderr)
+            print_cameras(cameras)
+            print("Abriendo selector...", file=sys.stderr)
+            return pick_camera_interactive(cameras, width=args.width, height=args.height)
+        save_camera_index(args.camera)
+        return args.camera
+
+    if args.pick_camera or len(cameras) > 1:
+        saved = load_saved_camera()
+        start = saved if saved in [c.index for c in cameras] else cameras[0].index
+        if args.pick_camera or saved is None:
+            chosen = pick_camera_interactive(
+                cameras, start_index=start, width=args.width, height=args.height
+            )
+            return chosen
+        # Varias camaras pero ya hay preferencia guardada
+        print(f"Usando camara guardada [{saved}]. Cambia con --pick-camera o tecla C.")
+        return saved
+
+    # Una sola camara
+    idx = cameras[0].index
+    save_camera_index(idx)
+    return idx
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
+
+    if args.list_cameras:
+        cameras = discover_cameras(width=args.width, height=args.height)
+        print_cameras(cameras)
+        return 0 if cameras else 1
+
+    cam_index = resolve_camera_index(args)
+    if cam_index is None:
+        # list-cameras ya salio; cancelar picker o sin camaras
+        return 1 if not args.list_cameras else 0
+
     cfg = Config(
-        cam_index=args.camera,
+        cam_index=cam_index,
         cam_width=args.width,
         cam_height=args.height,
         smoothening=max(1.0, args.smooth),

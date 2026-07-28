@@ -32,6 +32,7 @@ Controla el cursor de Windows con gestos de la mano, usando la webcam y visión 
 | Tecla | Acción |
 | :--- | :--- |
 | `Q` / `Esc` | Salir |
+| `C` | Cambiar cámara (selector visual) |
 | `H` | Mostrar / ocultar ayuda |
 | `L` | Mostrar / ocultar landmarks |
 | `+` / `-` | Ajustar suavizado del cursor |
@@ -72,6 +73,23 @@ pip install -r requirements.txt
 python virtual_mouse.py
 ```
 
+### Elegir cámara (webcam vs celular)
+
+Si tenés más de una cámara (p. ej. webcam + iPhone/Phone Link/DroidCam), el índice `0` a veces es la del celular.
+
+```bash
+# Ver camaras detectadas
+python virtual_mouse.py --list-cameras
+
+# Selector visual (vista previa en vivo)
+python virtual_mouse.py --pick-camera
+
+# Usar un indice concreto (ej. webcam en 1)
+python virtual_mouse.py -c 1
+```
+
+Durante la app, tecla **`C`** abre el selector otra vez. La elección se guarda en `~/.virtual_mouse/config.json`.
+
 ### Argumentos opcionales
 
 ```bash
@@ -81,7 +99,9 @@ python virtual_mouse.py --no-help
 
 | Flag | Descripción | Default |
 | :--- | :--- | :--- |
-| `-c` / `--camera` | Índice de webcam | `0` |
+| `-c` / `--camera` | Índice de webcam | guardada / selector |
+| `--list-cameras` | Lista cámaras y sale | — |
+| `--pick-camera` | Selector visual al inicio | auto si hay varias |
 | `--width` / `--height` | Resolución de captura | `640` / `480` |
 | `--smooth` | Suavizado del cursor (1–20) | `5` |
 | `--pinch` | Umbral de pellizco (px) | `35` |
